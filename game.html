@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - skinning and morphing</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			body {
+				color: #222;
+			}
+
+			a {
+				color: #2fa1d6;
+			}
+
+			p {
+				max-width: 600px;
+				margin-left: auto;
+				margin-right: auto;
+				padding: 0 2em;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="info">
+			<p>
+                Your points: <span id="points"></span>
+			</p>
+            <p>
+                Change level
+                <div>
+                    <input type="radio" id="level-0" name="level" value="0" checked>
+                    <label for="level-0">easy</label>
+                    <input type="radio" id="level-1" name="level" value="1">
+                    <label for="level-1">hard</label>
+                </div>
+            </p>
+			<a href="./game.html" >Restart</a>
+			
+		</div>
+
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/16.3.5/Tween.min.js"></script>
+
+		<!-- Import maps polyfill -->
+		<!-- Remove this when import maps will be widely supported -->
+		<script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./build/three.module.js"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			import Stats from './jsm/libs/stats.module.js';
+
+			import { GLTFLoader } from './jsm/loaders/GLTFLoader.js';
+
+			import { EffectComposer } from './jsm/postprocessing/EffectComposer.js';
+			import { RenderPass } from './jsm/postprocessing/RenderPass.js';
+			import { FilmPass } from './jsm/postprocessing/FilmPass.js';
+			import { BloomPass } from './jsm/postprocessing/BloomPass.js';
+			import { DDSLoader } from './jsm/loaders/DDSLoader.js';
+			import { TrackballControls } from './jsm/controls/TrackballControls.js';
+
+			let container, stats, clock, mixer, actions, activeAction, previousAction;
+			let camera, scene, renderer, model, face;
+			let spheres = [];
+			let ballRatio = 0, ballAnimationRatio = 50, even = true;
+			let monsters = [];
+			let monsterRatio = 0, monsterAnimationRatio = 250;
+
+			let uniforms, ballMesh;
+
+			let composer;
+
+			let punchFlag = false;
+			let jumpFlag = false;
+            let isDead = false;
+            let isFinished = false;
+            let addPoints = true;
+
+            let points = 0; 
+            let level = 0;
+
+			let material;
+			let controls;
+
+			const amount = parseInt( window.location.search.slice( 1 ) ) || 4;
+			const count = Math.pow( amount, 3 );
+			const dummy = new THREE.Object3D();
+
+			const api = { state: 'Walking' };
+
+			init();
+			animate();
+
+			function init() {
+
+				container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.25, 100 );
+				camera.position.set( - 15, 5, 15 );
+				camera.lookAt( new THREE.Vector3( 0, 2, 0 ) );
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color().setHSL( 0.6, 0, 1 );
+				scene.fog = new THREE.Fog( scene.background, 1, 5000 );
+
+				clock = new THREE.Clock();
+
+				document.addEventListener("keydown", onDocumentKeyDown, false);
+
+
+				// lights
+
+				const hemiLight = new THREE.HemisphereLight( 0xffffff, 0x444444 );
+				hemiLight.position.set( 0, 20, 0 );
+				scene.add( hemiLight );
+
+				const dirLight = new THREE.DirectionalLight( 0xffffff );
+				dirLight.position.set( 0, 20, 10 );
+				scene.add( dirLight );
+
+				// ground
+				const groundGeo = new THREE.PlaneGeometry( 2000, 2000 );
+				const groundMat = new THREE.MeshLambertMaterial( { color: 0xffffff } );
+				groundMat.color.setHSL( 0.095, 1, 0.75 );
+
+				const ground = new THREE.Mesh( groundGeo, groundMat );
+				ground.rotation.x = - Math.PI / 2;
+				ground.position.y = -2;
+				ground.receiveShadow = true;
+				scene.add( ground );
+
+				const grid = new THREE.GridHelper( 200, 40, 0x000000, 0x000000 );
+				grid.material.opacity = 0.05;
+				grid.material.transparent = true;
+				scene.add( grid );
+
+				// sky
+				const skyGeo = new THREE.SphereGeometry( 100, 32, 15 );
+				const skyMat = new THREE.MeshLambertMaterial( { color: 0x1B6B91} );
+				//skyMat.color.setHSL( 0.095, 1, 0.75 );
+
+				const sky = new THREE.Mesh( skyGeo, skyMat );
+				//sky.rotation.x = - Math.PI / 2;
+				sky.position.y = -2;
+				sky.receiveShadow = true;
+				scene.add( sky );
+
+				// model
+
+				const loader = new GLTFLoader();
+				loader.load( 'models/gltf/RobotExpressive/RobotExpressive.glb', function ( gltf ) {
+
+					model = gltf.scene;
+					scene.add( model );
+
+					createNavigation( model, gltf.animations );
+
+				}, undefined, function ( e ) {
+
+					console.error( e );
+
+				} );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.outputEncoding = THREE.sRGBEncoding;
+				container.appendChild( renderer.domElement );
+				renderer.autoClear = false;
+				window.addEventListener( 'resize', onWindowResize );
+				
+				controls = new TrackballControls( camera, renderer.domElement );
+				
+				controls.rotateSpeed = 1.0;
+
+				// stats
+				stats = new Stats();
+				container.appendChild( stats.dom );
+
+                //level
+                let input0 = document.querySelector('#level-0');
+                input0.addEventListener('change', function () {
+                    level = 0;
+                });
+                
+                let input1 = document.querySelector('#level-1');
+                input1.addEventListener('change', function () {
+                    level = 1;
+                });
+
+			}
+
+			function doAction(action) {
+				fadeToAction( action, 0.2 );
+				mixer.addEventListener( 'finished', restoreState );
+			}
+
+			function restoreState() {
+					mixer.removeEventListener( 'finished', restoreState );
+
+					fadeToAction( 'Walking', 0.2 );
+					punchFlag = false;
+					jumpFlag = false;
+                    addPoints = true;
+				}
+
+			function createNavigation( model, animations ) {
+
+				const states = [ 'Idle', 'Walking', 'Running', 'Dance', 'Death', 'Sitting', 'Standing' ];
+				const emotes = [ 'Jump', 'Yes', 'No', 'Wave', 'Punch', 'ThumbsUp' ];
+
+				mixer = new THREE.AnimationMixer( model );
+
+				actions = {};
+
+				for ( let i = 0; i < animations.length; i ++ ) {
+
+					const clip = animations[ i ];
+					const action = mixer.clipAction( clip );
+					actions[ clip.name ] = action;
+
+					if ( emotes.indexOf( clip.name ) >= 0 || states.indexOf( clip.name ) >= 4 ) {
+
+						action.clampWhenFinished = true;
+						action.loop = THREE.LoopOnce;
+
+					}
+
+				}
+
+				activeAction = actions[ 'Walking' ];
+				activeAction.play();
+			}
+
+			function fadeToAction( name, duration ) {
+
+				previousAction = activeAction;
+				activeAction = actions[ name ];
+
+				if ( previousAction !== activeAction ) {
+
+					previousAction.fadeOut( duration );
+
+				}
+
+				activeAction
+					.reset()
+					.setEffectiveTimeScale( 1 )
+					.setEffectiveWeight( 1 )
+					.fadeIn( duration )
+					.play();
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				controls.handleResize();
+			}
+
+			function onDocumentKeyDown(event) {
+				var keyCode = event.which;
+                if(!isDead) {
+                    if (keyCode == 40) {
+                        punchFlag = true;
+                        doAction('Punch');
+                    } else if(keyCode == 39) {
+                        model.position.x += 0.5;
+                    } else if(keyCode == 38) {
+                        jumpFlag = true;
+                        doAction('Jump');
+                    } else if(keyCode == 37) {
+                        model.position.x -= 0.5;
+                    }
+                }
+			}
+
+			function createBall() {
+                if(level == 0) {
+                    ballAnimationRatio = 50;
+                } else {
+                    ballAnimationRatio = 25;
+                }
+				if(ballRatio > ballAnimationRatio) {
+					const ballTranslation = Math.random() * 100 - 30;
+					const geometry = new THREE.SphereGeometry( 0.3, 32, 16 );
+					const material = new THREE.MeshPhongMaterial( { color: 0xFF0000 } );
+					const sphere = new THREE.Mesh( geometry, material );
+					spheres.push(sphere);
+					sphere.translateZ(100);
+					sphere.translateX(ballTranslation);
+					scene.add( sphere );
+					ballRatio = 0;
+				}
+				ballRatio++;
+			}
+
+			function createMonster() {
+				if(level == 0) {
+                    monsterAnimationRatio = 150;
+                } else {
+                    monsterAnimationRatio = 50;
+                }
+            
+				if(monsterRatio > monsterAnimationRatio) {
+					const monsterTranslation = Math.random() * 100 - 30;
+					const geometryLoader = new THREE.BufferGeometryLoader();
+					geometryLoader.load( './models/json/buffergeometry.json', function ( geometry ) {
+
+						geometry.computeVertexNormals();
+						geometry.scale( 0.3, 0.3, 0.3 );
+
+						const material = new THREE.MeshNormalMaterial();
+
+						let monsterMesh = new THREE.InstancedMesh( geometry, material, count );
+						monsterMesh.instanceMatrix.setUsage( THREE.DynamicDrawUsage ); // will be updated every frame
+						scene.add( monsterMesh );
+						monsterMesh.position.z = 100;
+						monsterMesh.position.x = monsterTranslation;
+						monsters.push({monster: monsterMesh, scale: 0.5});
+					} );
+
+					monsterRatio = 0;
+				}
+				monsterRatio++;
+			}
+
+			function animateObjects() {
+				spheres.forEach(function(sphere) {
+					if(!isBallClose(sphere) || (isBallClose(sphere) && jumpFlag)) {
+						if(level == 0) {
+							sphere.position.z -= 0.1;
+						} else {
+							sphere.position.z -= 0.3;
+						}
+					} else {
+						isDead = true;
+					}
+				})
+				monsters.forEach(function(monster) {
+					animateMonster(monster);
+				})
+			}
+
+			function isBallClose(ball) {
+				if(Math.abs(ball.position.x - model.position.x) < 2 && 
+					Math.abs(ball.position.z - model.position.z) < 0.5) {
+						return true;
+				}
+				return false;
+			}
+
+			function isMonsterClose(monsterMesh) {
+				if(Math.abs(monsterMesh.position.x - model.position.x) < 2 &&
+					Math.abs(monsterMesh.position.y - model.position.y) < 2 &&
+					Math.abs(monsterMesh.position.z - model.position.z) < 2) {
+						return true;
+				}
+				return false;
+			}
+
+			function isMonsterKilled(monsterMesh) {
+				if(isMonsterClose(monsterMesh) && punchFlag) {
+                    if(addPoints) {
+                        addPoints = false;
+                        points += 50;
+                    }
+					return true;
+				}
+				return false;
+			}
+
+			function animateMonster(monsterObj) {
+				let monsterMesh = monsterObj.monster;
+				if ( monsterMesh ) {
+					let scale = monsterObj.scale
+					if(scale > 15) {
+						monsters.pop(monsterObj);
+						scene.remove(monsterMesh);
+					} else if(isMonsterKilled(monsterMesh)) {
+						scale += 0.5;
+						monsterObj.scale += 0.5;
+					} else if(isMonsterClose(monsterMesh)) {
+						isDead = true;
+					} else {
+						if(level == 0) {
+							monsterMesh.position.z -= 0.05;
+						} else {
+							monsterMesh.position.z -= 0.1;
+						}
+					}
+					const time = Date.now() * 0.001;
+					monsterMesh.position.y = 1.5;
+					monsterMesh.rotation.x = Math.sin( time / 4 );
+					monsterMesh.rotation.y = Math.sin( time / 2 );
+
+					let i = 0;
+					const offset = ( amount - 1 ) / 2;
+
+					for ( let x = 0; x < amount; x ++ ) {
+						for ( let y = 0; y < amount; y ++ ) {
+							for ( let z = 0; z < amount; z ++ ) {
+								dummy.position.set( offset - scale * x, offset - scale * y, offset - scale * z );
+								dummy.rotation.y = ( Math.sin( x / 4 + time ) + Math.sin( y / 4 + time ) + Math.sin( z / 4 + time ) );
+								dummy.rotation.z = dummy.rotation.y * 2;
+								dummy.updateMatrix();
+								monsterMesh.setMatrixAt( i ++, dummy.matrix );
+							}
+						}
+					}
+					monsterMesh.instanceMatrix.needsUpdate = true;
+				}
+			}			
+
+			//
+
+			function animate() {
+
+				const dt = clock.getDelta();
+
+				if ( mixer ) mixer.update( dt );
+
+				requestAnimationFrame( animate );
+
+				renderer.render( scene, camera );
+				controls.update();
+				
+				stats.update();
+                document.getElementById("points").textContent = points;
+
+                if(!isDead) {
+                    createBall();
+                    createMonster();
+                    animateObjects();
+                } else if(!isFinished) {
+				    fadeToAction( 'Death', 0.2 );
+                    isFinished = true;
+                }
+			}
+
+		</script>
+
+	</body>
+</html>
