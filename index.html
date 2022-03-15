@@ -26,7 +26,7 @@
 	<body>
 		<div id="info">
 			Hi! Welcome to the game! 
-			<p>Use left and right arrow to move the robot, up arrow to jump and down arrow to punch.</p>
+			<p>Use arrows to move the robot, space to jump and enter to punch.</p>
 			<a href="./game.html" >Play me!</a>
 			
 		</div>
@@ -83,7 +83,8 @@
 				scene.add( hemiLight );
 
 				const dirLight = new THREE.DirectionalLight( 0xffffff );
-				dirLight.position.set( 0, 20, 10 );
+				dirLight.position.set( - 5, 3, 15 );
+				dirLight.castShadow = true;
 				scene.add( dirLight );
 
 				// ground
@@ -119,6 +120,9 @@
 				renderer.setSize( window.innerWidth, window.innerHeight );
 				renderer.outputEncoding = THREE.sRGBEncoding;
 				container.appendChild( renderer.domElement );
+
+				renderer.shadowMap.enabled = true;
+				renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 				window.addEventListener( 'resize', onWindowResize );
 
