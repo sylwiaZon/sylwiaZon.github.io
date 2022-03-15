@@ -74,7 +74,7 @@
 			let camera, scene, renderer, model, face;
 			let spheres = [];
 			let ballRatio = 0, ballAnimationRatio = 50, even = true;
-			let monsters = [];
+			let monsters;
 			let monsterRatio = 0, monsterAnimationRatio = 250;
 
 			let uniforms, ballMesh;
@@ -104,11 +104,12 @@
 
 			function init() {
 
+				monsters = [];
 				container = document.createElement( 'div' );
 				document.body.appendChild( container );
 
 				camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.25, 100 );
-				camera.position.set( - 15, 5, 15 );
+				camera.position.set( - 5, 5, 15 );
 				camera.lookAt( new THREE.Vector3( 0, 2, 0 ) );
 
 				scene = new THREE.Scene();
@@ -281,24 +282,24 @@
                         punchFlag = true;
                         doAction('Punch');
                     } else if(keyCode == 39) {
-                        model.position.x += 0.5;
+                        model.position.x += 1;
                     } else if(keyCode == 38) {
                         jumpFlag = true;
                         doAction('Jump');
                     } else if(keyCode == 37) {
-                        model.position.x -= 0.5;
+                        model.position.x -= 1;
                     }
                 }
 			}
 
 			function createBall() {
                 if(level == 0) {
-                    ballAnimationRatio = 50;
+                    ballAnimationRatio = 30;
                 } else {
-                    ballAnimationRatio = 25;
+                    ballAnimationRatio = 15;
                 }
 				if(ballRatio > ballAnimationRatio) {
-					const ballTranslation = Math.random() * 100 - 30;
+					const ballTranslation = Math.random() * 200 - 100;
 					const geometry = new THREE.SphereGeometry( 0.3, 32, 16 );
 					const material = new THREE.MeshPhongMaterial( { color: 0xFF0000 } );
 					const sphere = new THREE.Mesh( geometry, material );
@@ -313,13 +314,13 @@
 
 			function createMonster() {
 				if(level == 0) {
-                    monsterAnimationRatio = 150;
+                    monsterAnimationRatio = 100;
                 } else {
                     monsterAnimationRatio = 50;
                 }
             
 				if(monsterRatio > monsterAnimationRatio) {
-					const monsterTranslation = Math.random() * 100 - 30;
+					const monsterTranslation = Math.random() * 200 - 100;
 					const geometryLoader = new THREE.BufferGeometryLoader();
 					geometryLoader.load( './models/json/buffergeometry.json', function ( geometry ) {
 
@@ -333,7 +334,7 @@
 						scene.add( monsterMesh );
 						monsterMesh.position.z = 100;
 						monsterMesh.position.x = monsterTranslation;
-						monsters.push({monster: monsterMesh, scale: 0.5});
+						monsters.push({monster: monsterMesh, scale: 0.5, delete: false});
 					} );
 
 					monsterRatio = 0;
@@ -356,6 +357,10 @@
 				monsters.forEach(function(monster) {
 					animateMonster(monster);
 				})
+				var filteredMonsters = monsters.filter(function(value, index, arr){ 
+					return !value.deleted;
+				});
+				monsters = filteredMonsters;
 			}
 
 			function isBallClose(ball) {
@@ -391,19 +396,15 @@
 				if ( monsterMesh ) {
 					let scale = monsterObj.scale
 					if(scale > 15) {
-						monsters.pop(monsterObj);
+						monsterObj.deleted = true;
 						scene.remove(monsterMesh);
 					} else if(isMonsterKilled(monsterMesh)) {
 						scale += 0.5;
 						monsterObj.scale += 0.5;
-					} else if(isMonsterClose(monsterMesh)) {
+					} else if(isMonsterClose(monsterMesh) && !monsterObj.deleted) {
 						isDead = true;
 					} else {
-						if(level == 0) {
-							monsterMesh.position.z -= 0.05;
-						} else {
-							monsterMesh.position.z -= 0.1;
-						}
+						monsterMesh.position.z -= 0.05;
 					}
 					const time = Date.now() * 0.001;
 					monsterMesh.position.y = 1.5;
